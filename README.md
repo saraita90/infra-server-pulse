@@ -54,7 +54,7 @@ A single Bash script that prints a beautiful, framed report covering:
 
 ```bash
 # Clone the repo
-git clone https://github.com/YOUR_USERNAME/infra-server-pulse.git
+git clone https://github.com/saraita90/infra-server-pulse.git
 cd infra-server-pulse
 
 # Make executable
@@ -66,7 +66,7 @@ chmod +x src/server-pulse.sh
 
 Or run directly without cloning:
 ```bash
-bash <(curl -s https://raw.githubusercontent.com/YOUR_USERNAME/infra-server-pulse/main/src/server-pulse.sh)
+bash <(curl -s https://raw.githubusercontent.com/saraita90/infra-server-pulse/main/src/server-pulse.sh)
 ```
 
 ---
