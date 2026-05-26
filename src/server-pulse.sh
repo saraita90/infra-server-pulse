@@ -1,19 +1,16 @@
 #!/bin/bash
 # server-pulse.sh — Clean server health report
-# Usage: bash server-pulse.sh
 
 set -euo pipefail
 
-# ── Colors ─────────────────────────────────────────────
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 CYAN='\033[0;36m'
 BOLD='\033[1m'
-NC='\033[0m' # No Color
+NC='\033[0m'
 
-# ── Helpers ──────────────────────────────────────────
 print_header() {
     echo -e "${CYAN}╔══════════════════════════════════════════════════════════════╗${NC}"
     echo -e "${CYAN}║${BOLD}                     SERVER PULSE REPORT                      ${NC}${CYAN}║${NC}"
@@ -35,13 +32,10 @@ print_kv() {
     printf "${BOLD}%-20s${NC} %b%s%b\n" "$key" "$color" "$value" "$NC"
 }
 
-# ── Gather Data ──────────────────────────────────────
 CURRENT_DATE=$(date "+%Y-%m-%d %H:%M:%S %Z")
 HOSTNAME=$(hostname)
 UPTIME_INFO=$(uptime -p 2>/dev/null || uptime | awk -F',' '{print $1}' | sed 's/^ *//')
 
-# ── Disk ─────────────────────────────────────────────
-# Check root partition usage
 disk_usage=$(df -h / 2>/dev/null | awk 'NR==2 {print $5}' | tr -d '%') || disk_usage="N/A"
 disk_human=$(df -h / 2>/dev/null | awk 'NR==2 {print $3"/"$2 " ("$5")"}') || disk_human="N/A"
 
@@ -61,8 +55,6 @@ else
     disk_status="UNKNOWN"
 fi
 
-# ── Memory ─────────────────────────────────────────────
-# Parse /proc/meminfo for accurate numbers
 read mem_total mem_available <<< $(awk '
     /^MemTotal:/     {total=$2}
     /^MemAvailable:/ {avail=$2; exit}
@@ -70,10 +62,10 @@ read mem_total mem_available <<< $(awk '
 ' /proc/meminfo 2>/dev/null || echo "0 0")
 
 if (( mem_total > 0 )); then
-    mem_total_gb=$(awk "BEGIN {printf "%.1f", $mem_total / 1048576}")
-    mem_avail_gb=$(awk "BEGIN {printf "%.1f", $mem_available / 1048576}")
-    mem_used_gb=$(awk "BEGIN {printf "%.1f", ($mem_total - $mem_available) / 1048576}")
-    mem_free_pct=$(awk "BEGIN {printf "%.0f", ($mem_available / $mem_total) * 100}")
+    mem_total_gb=$(awk -v total="$mem_total" 'BEGIN {printf "%.1f", total / 1048576}')
+    mem_avail_gb=$(awk -v avail="$mem_available" 'BEGIN {printf "%.1f", avail / 1048576}')
+    mem_used_gb=$(awk -v total="$mem_total" -v avail="$mem_available" 'BEGIN {printf "%.1f", (total - avail) / 1048576}')
+    mem_free_pct=$(awk -v total="$mem_total" -v avail="$mem_available" 'BEGIN {printf "%.0f", (avail / total) * 100}')
     mem_human="${mem_used_gb}G / ${mem_total_gb}G (${mem_free_pct}% free)"
 
     if (( mem_free_pct < 10 )); then
@@ -93,11 +85,10 @@ else
     mem_free_pct="N/A"
 fi
 
-# ── Load Average ─────────────────────────────────────
 load_avg=$(cut -d' ' -f1 /proc/loadavg 2>/dev/null || echo "N/A")
 cpu_cores=$(nproc 2>/dev/null || echo "1")
 if [[ "$load_avg" != "N/A" ]]; then
-    load_pct=$(awk "BEGIN {printf "%.0f", ($load_avg / $cpu_cores) * 100}")
+    load_pct=$(awk -v ld="$load_avg" -v cores="$cpu_cores" 'BEGIN {printf "%.0f", (ld / cores) * 100}')
     if (( load_pct > 90 )); then
         load_color="$RED"
     elif (( load_pct > 70 )); then
@@ -111,7 +102,6 @@ else
     load_color="$YELLOW"
 fi
 
-# ── Status Evaluation ──────────────────────────────────
 issues=0
 if [[ "$disk_status" == "CRITICAL" ]] || [[ "$mem_status" == "CRITICAL" ]]; then
     status_color="$RED"
@@ -126,8 +116,6 @@ else
     status_text="✓  All systems operational"
 fi
 
-# ── Print Report ─────────────────────────────────────
-clear 2>/dev/null || true
 print_header
 
 print_section "System Identity"
