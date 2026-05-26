@@ -1,0 +1,159 @@
+#!/bin/bash
+# server-pulse.sh — Clean server health report
+# Usage: bash server-pulse.sh
+
+set -euo pipefail
+
+# ── Colors ─────────────────────────────────────────────
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+BOLD='\033[1m'
+NC='\033[0m' # No Color
+
+# ── Helpers ──────────────────────────────────────────
+print_header() {
+    echo -e "${CYAN}╔══════════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${CYAN}║${BOLD}                     SERVER PULSE REPORT                      ${NC}${CYAN}║${NC}"
+    echo -e "${CYAN}╚══════════════════════════════════════════════════════════════╝${NC}"
+    echo
+}
+
+print_section() {
+    local title="$1"
+    echo -e "${BLUE}┌──────────────────────────────────────────────────────────────┐${NC}"
+    echo -e "${BLUE}│${BOLD}  ${title}${NC}"
+    echo -e "${BLUE}└──────────────────────────────────────────────────────────────┘${NC}"
+}
+
+print_kv() {
+    local key="$1"
+    local value="$2"
+    local color="${3:-$NC}"
+    printf "${BOLD}%-20s${NC} %b%s%b\n" "$key" "$color" "$value" "$NC"
+}
+
+# ── Gather Data ──────────────────────────────────────
+CURRENT_DATE=$(date "+%Y-%m-%d %H:%M:%S %Z")
+HOSTNAME=$(hostname)
+UPTIME_INFO=$(uptime -p 2>/dev/null || uptime | awk -F',' '{print $1}' | sed 's/^ *//')
+
+# ── Disk ─────────────────────────────────────────────
+# Check root partition usage
+disk_usage=$(df -h / 2>/dev/null | awk 'NR==2 {print $5}' | tr -d '%') || disk_usage="N/A"
+disk_human=$(df -h / 2>/dev/null | awk 'NR==2 {print $3"/"$2 " ("$5")"}') || disk_human="N/A"
+
+if [[ "$disk_usage" != "N/A" ]]; then
+    if (( disk_usage > 90 )); then
+        disk_color="$RED"
+        disk_status="CRITICAL"
+    elif (( disk_usage > 75 )); then
+        disk_color="$YELLOW"
+        disk_status="WARNING"
+    else
+        disk_color="$GREEN"
+        disk_status="OK"
+    fi
+else
+    disk_color="$YELLOW"
+    disk_status="UNKNOWN"
+fi
+
+# ── Memory ─────────────────────────────────────────────
+# Parse /proc/meminfo for accurate numbers
+read mem_total mem_available <<< $(awk '
+    /^MemTotal:/     {total=$2}
+    /^MemAvailable:/ {avail=$2; exit}
+    END {print total, avail}
+' /proc/meminfo 2>/dev/null || echo "0 0")
+
+if (( mem_total > 0 )); then
+    mem_total_gb=$(awk "BEGIN {printf "%.1f", $mem_total / 1048576}")
+    mem_avail_gb=$(awk "BEGIN {printf "%.1f", $mem_available / 1048576}")
+    mem_used_gb=$(awk "BEGIN {printf "%.1f", ($mem_total - $mem_available) / 1048576}")
+    mem_free_pct=$(awk "BEGIN {printf "%.0f", ($mem_available / $mem_total) * 100}")
+    mem_human="${mem_used_gb}G / ${mem_total_gb}G (${mem_free_pct}% free)"
+
+    if (( mem_free_pct < 10 )); then
+        mem_color="$RED"
+        mem_status="CRITICAL"
+    elif (( mem_free_pct < 20 )); then
+        mem_color="$YELLOW"
+        mem_status="WARNING"
+    else
+        mem_color="$GREEN"
+        mem_status="OK"
+    fi
+else
+    mem_human="N/A"
+    mem_color="$YELLOW"
+    mem_status="UNKNOWN"
+    mem_free_pct="N/A"
+fi
+
+# ── Load Average ─────────────────────────────────────
+load_avg=$(cut -d' ' -f1 /proc/loadavg 2>/dev/null || echo "N/A")
+cpu_cores=$(nproc 2>/dev/null || echo "1")
+if [[ "$load_avg" != "N/A" ]]; then
+    load_pct=$(awk "BEGIN {printf "%.0f", ($load_avg / $cpu_cores) * 100}")
+    if (( load_pct > 90 )); then
+        load_color="$RED"
+    elif (( load_pct > 70 )); then
+        load_color="$YELLOW"
+    else
+        load_color="$GREEN"
+    fi
+    load_human="${load_avg} (${load_pct}% on ${cpu_cores} cores)"
+else
+    load_human="N/A"
+    load_color="$YELLOW"
+fi
+
+# ── Status Evaluation ──────────────────────────────────
+issues=0
+if [[ "$disk_status" == "CRITICAL" ]] || [[ "$mem_status" == "CRITICAL" ]]; then
+    status_color="$RED"
+    status_text="⚠  CRITICAL: Immediate attention required"
+    issues=1
+elif [[ "$disk_status" == "WARNING" ]] || [[ "$mem_status" == "WARNING" ]]; then
+    status_color="$YELLOW"
+    status_text="⚡ WARNING: Monitor closely"
+    issues=1
+else
+    status_color="$GREEN"
+    status_text="✓  All systems operational"
+fi
+
+# ── Print Report ─────────────────────────────────────
+clear 2>/dev/null || true
+print_header
+
+print_section "System Identity"
+print_kv "Date"      "$CURRENT_DATE" "$CYAN"
+print_kv "Hostname"  "$HOSTNAME"     "$CYAN"
+print_kv "Uptime"    "$UPTIME_INFO"  "$CYAN"
+echo
+
+print_section "Disk Usage (/)"
+print_kv "Usage"     "$disk_human"   "$disk_color"
+print_kv "Status"    "$disk_status"  "$disk_color"
+echo
+
+print_section "Memory"
+print_kv "Usage"     "$mem_human"    "$mem_color"
+print_kv "Status"    "$mem_status"   "$mem_color"
+echo
+
+print_section "Load Average"
+print_kv "1-min"     "$load_human"   "$load_color"
+echo
+
+print_section "Overall Status"
+echo -e "${BOLD}${status_color}  ${status_text}${NC}"
+echo
+
+echo -e "${CYAN}──────────────────────────────────────────────────────────────${NC}"
+echo -e "${CYAN}  Report generated by server-pulse.sh  •  $(date +%H:%M:%S)${NC}"
+echo -e "${CYAN}──────────────────────────────────────────────────────────────${NC}"
